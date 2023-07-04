@@ -83,6 +83,7 @@ FIXTURE_PROPERTY_METADATA_LIST = [
     fixture_property_metadata(
         name="property4", default="default4", advanced=True
     ),
+    fixture_property_metadata(name="property1", default="duplicate_default1"),
 ]
 
 
@@ -243,7 +244,7 @@ class TestPropertyConfigurationFacadeGetPropertiesMetadata(TestCase):
         self.assertEqual(self.facade.get_properties_metadata(), metadata)
 
     def test_metadata_with_advanced(self):
-        metadata = FIXTURE_PROPERTY_METADATA_LIST
+        metadata = FIXTURE_PROPERTY_METADATA_LIST[:-1]
         self.assertEqual(
             self.facade.get_properties_metadata(include_advanced=True), metadata
         )
@@ -251,7 +252,7 @@ class TestPropertyConfigurationFacadeGetPropertiesMetadata(TestCase):
     def test_metadata_specified(self):
         metadata = (
             FIXTURE_PROPERTY_METADATA_LIST[0:1]
-            + FIXTURE_PROPERTY_METADATA_LIST[-1:]
+            + FIXTURE_PROPERTY_METADATA_LIST[-2:-1]
         )
         self.assertEqual(
             self.facade.get_properties_metadata(
