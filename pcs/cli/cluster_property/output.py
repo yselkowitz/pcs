@@ -11,6 +11,7 @@ from pcs.cli.nvset import nvset_dto_to_lines
 from pcs.cli.resource.output import resource_agent_parameter_metadata_to_text
 from pcs.common.pacemaker.cluster_property import ClusterPropertyMetadataDto
 from pcs.common.pacemaker.nvset import (
+    CibNvpairDto,
     CibNvsetDto,
     ListCibNvsetDto,
 )
@@ -34,21 +35,24 @@ class PropertyConfigurationFacade:
         readonly_properties: StringCollection,
     ) -> None:
         self._properties = properties
+        self._first_nvpair_set = (
+            self._properties[0].nvpairs if self._properties else []
+        )
         self._properties_metadata = properties_metadata
         self._readonly_properties = readonly_properties
-        self._defaults_map = {
-            metadata.name: metadata.default
-            for metadata in self._properties_metadata
-            if metadata.default is not None
+        self._defaults_map = self.get_defaults(include_advanced=True)
+        # Deduplicate and keep the first value because pacemaker is using the
+        # first nvpair value. Python dict is keeping the last value for the
+        # repeating key. This way can method get_property_value() return a
+        # value in effect.
+        seen: dict[str, CibNvpairDto] = {}
+        self._name_nvpair_dto_map = {
+            nvpair_dto.name: nvpair_dto
+            for nvpair_dto in [
+                seen.setdefault(nvpair_dto.name, nvpair_dto)
+                for nvpair_dto in self._first_nvpair_set
+            ]
         }
-        self._name_nvpair_dto_map = (
-            {
-                nvpair_dto.name: nvpair_dto
-                for nvpair_dto in self._properties[0].nvpairs
-            }
-            if self._properties
-            else {}
-        )
 
     @classmethod
     def from_properties_dtos(
@@ -108,17 +112,6 @@ class PropertyConfigurationFacade:
             return value
         return self._defaults_map.get(property_name, custom_default)
 
-    @staticmethod
-    def _filter_names_advanced(
-        metadata: ResourceAgentParameterDto,
-        property_names: Optional[StringSequence] = None,
-        include_advanced: bool = False,
-    ) -> bool:
-        return bool(
-            (not property_names and (include_advanced or not metadata.advanced))
-            or (property_names and metadata.name in property_names)
-        )
-
     def get_defaults(
         self,
         property_names: Optional[StringSequence] = None,
@@ -126,11 +119,10 @@ class PropertyConfigurationFacade:
     ) -> Dict[str, str]:
         return {
             metadata.name: metadata.default
-            for metadata in self._properties_metadata
-            if metadata.default is not None
-            and self._filter_names_advanced(
-                metadata, property_names, include_advanced
+            for metadata in self.get_properties_metadata(
+                property_names, include_advanced
             )
+            if metadata.default is not None
         }
 
     def get_properties_metadata(
@@ -138,23 +130,37 @@ class PropertyConfigurationFacade:
         property_names: Optional[StringSequence] = None,
         include_advanced: bool = False,
     ) -> Sequence[ResourceAgentParameterDto]:
+        if property_names:
+            filtered_metadata = [
+                metadata
+                for metadata in self._properties_metadata
+                if metadata.name in property_names
+            ]
+        else:
+            filtered_metadata = [
+                metadata
+                for metadata in self._properties_metadata
+                if include_advanced or not metadata.advanced
+            ]
+        # Deduplicate by preserving order and first value
+        seen: dict[str, ResourceAgentParameterDto] = {}
         return [
-            metadata
-            for metadata in self._properties_metadata
-            if self._filter_names_advanced(
-                metadata, property_names, include_advanced
-            )
+            seen.setdefault(metadata.name, metadata)
+            for metadata in filtered_metadata
+            if metadata.name not in seen
         ]
 
     def get_name_value_default_list(self) -> List[Tuple[str, str, bool]]:
         name_value_default_list = [
             (nvpair_dto.name, nvpair_dto.value, False)
-            for nvpair_dto in self._name_nvpair_dto_map.values()
+            for nvpair_dto in self._first_nvpair_set
         ]
         name_value_default_list.extend(
             [
                 (metadata_dto.name, metadata_dto.default, True)
-                for metadata_dto in self._properties_metadata
+                for metadata_dto in self.get_properties_metadata(
+                    include_advanced=True
+                )
                 if metadata_dto.name not in self._name_nvpair_dto_map
                 and metadata_dto.default is not None
             ]
